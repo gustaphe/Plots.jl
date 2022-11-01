@@ -1359,6 +1359,29 @@ end
 @deps quiver shape path
 
 # --------------------------------------------------------------------
+# vector
+# --------------------------------------------------------------------
+@shorthands vector
+@recipe function f(::Type{Val{:vector}}, x, y, z)
+    isnothing(z) || @warn("Ignoring third supplied vector")
+    if x isa Base.OneTo
+        x = zeros(size(y))
+    end
+    seriestype := :path
+    arrow --> true
+    x_new = vcat(x[1, :], y[1, :])
+    x := x_new
+    y_new = vcat(x[2, :], y[2, :])
+    y := y_new
+    if size(y, 1) > 2
+        z_new = vcat(x[3, :], y[3, :])
+        z := z_new
+        return x_new, y_new, z_new
+    end
+    return x_new, y_new
+end
+
+# --------------------------------------------------------------------
 # 1 argument
 # --------------------------------------------------------------------
 

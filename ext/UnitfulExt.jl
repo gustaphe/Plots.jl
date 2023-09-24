@@ -32,7 +32,7 @@ function fixaxis!(attr, x, axisletter)
     axislabel = Symbol(axisletter, :guide) # xguide, yguide, zguide
     axislims = Symbol(axisletter, :lims)   # xlims, ylims, zlims
     axisticks = Symbol(axisletter, :ticks) # xticks, yticks, zticks
-    err = Symbol(axisletter, :error)       # xerror, yerror, zerror
+    axiserror = Symbol(axisletter, :error)       # xerror, yerror, zerror
     axisunit = Symbol(axisletter, :unit)   # xunit, yunit, zunit
     axis = Symbol(axisletter, :axis)       # xaxis, yaxis, zaxis
     u = pop!(attr, axisunit, _unit(eltype(x)))  # get the unit
@@ -45,7 +45,7 @@ function fixaxis!(attr, x, axisletter)
     end
     # fix the attributes: labels, lims, ticks, marker/line stuff, etc.
     append_unit_if_needed!(attr, axislabel, u)
-    ustripattribute!(attr, err, u)
+    ustripattribute!(attr, axiserror, u)
     if axisletter === :y
         ustripattribute!(attr, :ribbon, u)
         ustripattribute!(attr, :fillrange, u)
@@ -334,7 +334,7 @@ function _ustrip(u, x)
 end
 
 function _unit(x)
-    (t = eltype(x)) <: LogScaled && return logunit(t)
+    (T = eltype(x)) <: LogScaled && return logunit(T)
     unit(x)
 end
 

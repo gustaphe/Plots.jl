@@ -471,6 +471,7 @@ const _subplot_defaults = KW(
     :colorbar_titlefontvalign => :vcenter,
     :colorbar_titlefontrotation => 0.0,
     :colorbar_titlefontcolor => :match,
+    :colorbar_unit => 1,
     :framestyle => :axes,
     :camera => (30, 30),
     :extra_kwargs => Dict(),
@@ -519,6 +520,7 @@ const _axis_defaults = KW(
     :showaxis                    => true,
     :widen                       => :auto,
     :draw_arrow                  => false,
+    :unit                        => 1,
     :unitformat                  => :round,
 )
 
@@ -908,6 +910,7 @@ add_aliases(
     :colorkey_title,
 )
 add_aliases(:clims, :clim, :cbarlims, :cbar_lims, :climits, :color_limits)
+add_aliases(:colorbar_unit, :cunit)
 add_aliases(:smooth, :regression, :reg)
 add_aliases(:levels, :nlevels, :nlev, :levs)
 add_aliases(:size, :windowsize, :wsize)

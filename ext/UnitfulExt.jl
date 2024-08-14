@@ -5,9 +5,10 @@ module UnitfulExt
 
 import Plots: Plots, @ext_imp_use, @recipe, PlotText, Subplot, AVec, AMat, Axis
 import RecipesBase
-@ext_imp_use :import Unitful Quantity unit ustrip Unitful dimension Units NoUnits LogScaled logunit MixedUnits Level Gain uconvert
+@ext_imp_use :import Unitful Quantity unit ustrip Unitful dimension Units NoUnits LogScaled logunit MixedUnits Level Gain uconvert DimensionError
 import LaTeXStrings: LaTeXString
 import Latexify: latexify
+import Base: showerror
 using UnitfulLatexify
 
 const MissingOrQuantity = Union{Missing,<:Quantity,<:LogScaled}
@@ -20,9 +21,7 @@ Main recipe
     axisletter = plotattributes[:letter]   # x, y, or z
     clims_types = (:contour, :contourf, :heatmap, :surface)
     if axisletter === :z && get(plotattributes, :seriestype, :nothing) ∈ clims_types
-        u = get(plotattributes, :zunit, _unit(eltype(x)))
-        ustripattribute!(plotattributes, :clims, u)
-        append_unit_if_needed!(plotattributes, :colorbar_title, u)
+        fixcolorbar!(plotattributes, x)
     end
     fixaxis!(plotattributes, x, axisletter)
 end
@@ -35,14 +34,36 @@ function fixaxis!(attr, x, axisletter)
     axiserror = Symbol(axisletter, :error)       # xerror, yerror, zerror
     axisunit = Symbol(axisletter, :unit)   # xunit, yunit, zunit
     axis = Symbol(axisletter, :axis)       # xaxis, yaxis, zaxis
-    u = pop!(attr, axisunit, _unit(eltype(x)))  # get the unit
+    u = _unit(eltype(x))
     # if the subplot already exists with data, get its unit
     sp = get(attr, :subplot, 1)
     if sp ≤ length(attr[:plot_object]) && attr[:plot_object].n > 0
+        subplot = attr[:plot_object][sp]
+        u = subplot[axis][:unit]
+        supplied_unit = get(attr, axisunit, u)
+        if u != supplied_unit
+            dimension(u) == dimension(supplied_unit) || throw(DimensionError(u, supplied_unit))
+            # Reinterpret existing data in new unit
+            for series in subplot.series_list
+                series[axisletter] = _ustrip.(supplied_unit, series[axisletter]*u)
+                if series[axiserror] isa Tuple
+                    series[axiserror] = map(x -> _ustrip.(supplied_unit, x*u), series[axiserror])
+                elseif series[axiserror] isa AbstractArray
+                    series[axiserror] = _ustrip.(supplied_unit, series[axiserror]*u)
+                end
+            end
+            for attribute in (:lims, :ticks)
+                # If these arguments are symbols, for instance :auto, they are not
+                # guaranteed to visually update immediately.
+                if subplot[axis][attribute] isa AbstractArray{Number}
+                    subplot[axis][attribute] = _ustrip.(attr[axisunit], subplot[axis][attribute]*u)
+                end
+            end
+        end
         label = attr[:plot_object][sp][axis][:guide]
-        u = getaxisunit(label)
         get!(attr, axislabel, label)  # if label was not given as an argument, reuse
     end
+    u = get!(attr, axisunit, u)
     # fix the attributes: labels, lims, ticks, marker/line stuff, etc.
     append_unit_if_needed!(attr, axislabel, u)
     ustripattribute!(attr, axiserror, u)
@@ -54,6 +75,46 @@ function fixaxis!(attr, x, axisletter)
     fixmarkercolor!(attr)
     fixmarkersize!(attr)
     fixlinecolor!(attr)
+    _ustrip.(u, x)  # strip the unit
+end
+
+function fixcolorbar!(attr, x)
+    # Follows, code from fixaxis!, incrementally changed
+    # Attribute keys
+    axislabel = :colorbar_title
+    axislims = :clims
+    axisticks = :colorbar_ticks
+    axisunit = :cunit
+    axis = :colorbar
+    u = _unit(eltype(x))
+    # if the subplot already exists with data, get its unit
+    sp = get(attr, :subplot, 1)
+    if sp ≤ length(attr[:plot_object]) && attr[:plot_object].n > 0
+        subplot = attr[:plot_object][sp]
+        u = subplot[:cunit]
+        supplied_unit = get(attr, axisunit, u)
+        if u != supplied_unit
+            dimension(u) == dimension(supplied_unit) || throw(DimensionError(u, supplied_unit))
+            # Reinterpret existing data in new unit
+            for series in subplot.series_list
+                for attribute in (:marker_z, :line_z, :fill_z)
+                    if series[attribute] isa AbstractArray{Number}
+                        series[attribute] = _ustrip.(supplied_unit, series[attribute]*u)
+                    end
+                end
+            end
+            for attribute in (axislims, axisticks)
+                if subplot[attribute] isa AbstractArray{Number}
+                    subplot[attribute] = _ustrip.(attr[axisunit], subplot[attribute]*u)
+                end
+            end
+        end
+        label = attr[:plot_object][sp][axislabel]
+        get!(attr, axislabel, label)  # if label was not given as an argument, reuse
+    end
+    u = get!(attr, axisunit, u)
+    # fix the attributes: labels, lims, ticks, marker/line stuff, etc.
+    append_unit_if_needed!(attr, axislabel, u)
     _ustrip.(u, x)  # strip the unit
 end
 
@@ -192,19 +253,22 @@ abstract type AbstractProtectedString <: AbstractString end
 struct ProtectedString{S} <: AbstractProtectedString
     content::S
 end
-struct UnitfulString{S,U} <: AbstractProtectedString
-    content::S
+struct UnitfulString{S,U,F} <: AbstractProtectedString
+    label::S
     unit::U
+    format::F
 end
 # Minimum required AbstractString interface to work with Plots
 const S = AbstractProtectedString
-Base.iterate(n::S) = iterate(n.content)
-Base.iterate(n::S, i::Integer) = iterate(n.content, i)
-Base.codeunit(n::S) = codeunit(n.content)
-Base.ncodeunits(n::S) = ncodeunits(n.content)
-Base.isvalid(n::S, i::Integer) = isvalid(n.content, i)
-Base.pointer(n::S) = pointer(n.content)
-Base.pointer(n::S, i::Integer) = pointer(n.content, i)
+content(n::ProtectedString) = n.content
+content(n::UnitfulString) = strip(format_unit_label(n.label, n.unit, n.format))
+Base.iterate(n::S) = iterate(content(n))
+Base.iterate(n::S, i::Integer) = iterate(content(n), i)
+Base.codeunit(n::S) = codeunit(content(n))
+Base.ncodeunits(n::S) = ncodeunits(content(n))
+Base.isvalid(n::S, i::Integer) = isvalid(content(n), i)
+Base.pointer(n::S) = pointer(content(n))
+Base.pointer(n::S, i::Integer) = pointer(content(n), i)
 
 Plots.protectedstring(s) = ProtectedString(s)
 
@@ -216,39 +280,21 @@ append_unit_if_needed!(attr, key, u) =
     append_unit_if_needed!(attr, key, get(attr, key, nothing), u)
 # dispatch on the type of `label`
 append_unit_if_needed!(attr, key, label::ProtectedString, u) = nothing
-append_unit_if_needed!(attr, key, label::UnitfulString, u) = nothing
-function append_unit_if_needed!(attr, key, label::Nothing, u)
-    attr[key] = if attr[:plot_object].backend == Plots.PGFPlotsXBackend()
-        UnitfulString(LaTeXString(latexify(u)), u)
-    else
-        UnitfulString(string(u), u)
+function append_unit_if_needed!(attr, key, label::UnitfulString, u)
+    if u != label.unit
+        attr[key] = UnitfulString(label.label, u, label.format)
     end
+    nothing
+end
+function append_unit_if_needed!(attr, key, label::Nothing, u)
+    if attr[:plot_object].backend isa Plots.PGFPlotsXBackend
+        return attr[key] = UnitfulString("", u, (l, u) -> latexify(u))
+    end
+    attr[key] = UnitfulString("", u, nothing)
 end
 function append_unit_if_needed!(attr, key, label::S, u) where {S<:AbstractString}
-    isempty(label) && return attr[key] = UnitfulString(label, u)
-    if attr[:plot_object].backend == Plots.PGFPlotsXBackend()
-        attr[key] = UnitfulString(
-            LaTeXString(
-                format_unit_label(
-                    label,
-                    latexify(u),
-                    get(attr, Symbol(get(attr, :letter, ""), :unitformat), :round),
-                ),
-            ),
-            u,
-        )
-    else
-        attr[key] = UnitfulString(
-            S(
-                format_unit_label(
-                    label,
-                    u,
-                    get(attr, Symbol(get(attr, :letter, ""), :unitformat), :round),
-                ),
-            ),
-            u,
-        )
-    end
+    isempty(label) && return attr[key] = UnitfulString(label, u, nothing)
+    attr[key] = UnitfulString(label, u, get(attr, Symbol(get(attr, :letter, ""), :unitformat), :round))
 end
 
 #=============================================
@@ -280,58 +326,53 @@ format_unit_label(l, u, f::NTuple{3,Char})             = string(f[1], l, ' ', f[
 format_unit_label(l, u, f::Bool)                       = f ? format_unit_label(l, u, :round) : format_unit_label(l, u, nothing)
 format_unit_label(l, u, f::Symbol)                     = format_unit_label(l, u, UNIT_FORMATS[f])
 
-getaxisunit(::AbstractString) = NoUnits
-getaxisunit(s::UnitfulString) = s.unit
-getaxisunit(a::Axis) = getaxisunit(a[:guide])
-
 #==============
 Fix annotations
 ===============#
 function Plots.locate_annotation(
-    sp::Subplot,
-    x::MissingOrQuantity,
-    y::MissingOrQuantity,
-    label::PlotText,
+        sp::Subplot,
+        x::MissingOrQuantity,
+        y::MissingOrQuantity,
+        label::PlotText,
 )
-    xunit = getaxisunit(sp.attr[:xaxis])
-    yunit = getaxisunit(sp.attr[:yaxis])
+    xunit = sp.attr[:xaxis][:unit]
+    yunit = sp.attr[:yaxis][:unit]
     (_ustrip(xunit, x), _ustrip(yunit, y), label)
 end
 function Plots.locate_annotation(
-    sp::Subplot,
-    x::MissingOrQuantity,
-    y::MissingOrQuantity,
-    z::MissingOrQuantity,
-    label::PlotText,
+        sp::Subplot,
+        x::MissingOrQuantity,
+        y::MissingOrQuantity,
+        z::MissingOrQuantity,
+        label::PlotText,
 )
-    xunit = getaxisunit(sp.attr[:xaxis])
-    yunit = getaxisunit(sp.attr[:yaxis])
-    zunit = getaxisunit(sp.attr[:zaxis])
+    xunit = sp.attr[:xaxis][:unit]
+    yunit = sp.attr[:yaxis][:unit]
+    zunit = sp.attr[:zaxis][:unit]
     (_ustrip(xunit, x), _ustrip(yunit, y), _ustrip(zunit, z), label)
 end
 function Plots.locate_annotation(
-    sp::Subplot,
-    rel::NTuple{N,<:MissingOrQuantity},
-    label,
+        sp::Subplot,
+        rel::NTuple{N,<:MissingOrQuantity},
+        label,
 ) where {N}
-    units = getaxisunit(sp.attr[:xaxis], sp.attr[:yaxis], sp.attr[:zaxis])
+    units = (
+             sp.attr[:xaxis][:unit],
+             sp.attr[:yaxis][:unit],
+             sp.attr[:zaxis][:unit]
+            )
     Plots.locate_annotation(sp, _ustrip.(zip(units, rel)), label)
 end
 
 #==================#
 # ticks and limits #
 #==================#
-Plots._transform_ticks(ticks::AbstractArray{T}, axis) where {T<:Quantity} =
-    _ustrip.(getaxisunit(axis), ticks)
-Plots.process_limits(lims::AbstractArray{T}, axis) where {T<:Quantity} =
-    _ustrip.(getaxisunit(axis), lims)
-Plots.process_limits(lims::Tuple{S,T}, axis) where {S<:Quantity,T<:Quantity} =
-    _ustrip.(getaxisunit(axis), lims)
+Plots._transform_ticks(ticks::AbstractArray{T}, axis) where {T<:Quantity} = _ustrip.(axis[:unit], ticks)
+Plots.process_limits(lims::AbstractArray{T}, axis) where {T<:Quantity} = _ustrip.(axis[:unit], lims)
+Plots.process_limits(lims::Tuple{S,T}, axis) where {S<:Quantity,T<:Quantity} = _ustrip.(axis[:unit], lims)
 
-function _ustrip(u, x)
-    u isa MixedUnits && return ustrip(uconvert(u, x))
-    ustrip(u, x)
-end
+_ustrip(u::MixedUnits, x) = ustrip(uconvert(u, x))
+_ustrip(u, x) = ustrip(u, x)
 
 function _unit(x)
     (T = eltype(x)) <: LogScaled && return logunit(T)
@@ -339,7 +380,7 @@ function _unit(x)
 end
 
 function Plots.pgfx_sanitize_string(s::UnitfulString)
-    UnitfulString(Plots.pgfx_sanitize_string(s.content), s.unit)
+    UnitfulString(Plots.pgfx_sanitize_string(s.label), s.unit, s.format)
 end
 
 end  # module

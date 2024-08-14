@@ -5,6 +5,7 @@ using Unitful: m, cm, s, DimensionError
 xguide(pl, idx = length(pl.subplots)) = pl.subplots[idx].attr[:xaxis].plotattributes[:guide]
 yguide(pl, idx = length(pl.subplots)) = pl.subplots[idx].attr[:yaxis].plotattributes[:guide]
 zguide(pl, idx = length(pl.subplots)) = pl.subplots[idx].attr[:zaxis].plotattributes[:guide]
+cguide(pl, idx = length(pl.subplots)) = pl.subplots[idx].attr[:colorbar_title]
 xseries(pl, idx = length(pl.series_list)) = pl.series_list[idx].plotattributes[:x]
 yseries(pl, idx = length(pl.series_list)) = pl.series_list[idx].plotattributes[:y]
 zseries(pl, idx = length(pl.series_list)) = pl.series_list[idx].plotattributes[:z]
@@ -35,8 +36,8 @@ end
         @test yguide(plot(y, ylabel = "hello")) == "hello (m)"
         @test yguide(plot(y, ylabel = P"hello")) == "hello"
         pl = plot(y, ylabel = "")
-        @test yguide(pl) == ""
-        @test yguide(plot!(pl, -y)) == ""
+        @test yguide(pl) == "m"
+        @test yguide(plot!(pl, -y)) == "m"
         pl = plot(y; ylabel = "hello")
         plot!(pl, -y)
         @test yguide(pl) == "hello (m)"
@@ -283,6 +284,24 @@ end
     @test yguide(pl) == "m"
     @test yseries(pl) ≈ ustrip.(x2) / 100
     @test_throws DimensionError plot!(pl, x3) # can't place seconds on top of meters!
+end
+
+@testset "Axis unit" begin
+    x1 = (1:10) * u"m"
+    x2 = (1:10) * u"cm"
+    x3 = (1:10) * u"s"
+    pl = plot(x1; yunit=u"cm")
+    @test yseries(pl, 1) ≈ 100:100:1000
+    @test yguide(pl) == "cm"
+    plot!(pl, x2; yunit=u"m")
+    @test yseries(pl, 1) ≈ 1:10
+    @test yseries(pl, 2) ≈ 0.01:0.01:0.1
+    @test yguide(pl) == "m"
+    @test_throws DimensionError plot!(pl, x3)
+    @test_throws DimensionError plot(x1; yunit=u"s")
+    #@test_throws_broken DimensionError plot!(pl, 1:5) # Currently no unit checking for non-unitful `plot` calls
+    pl = plot(x1; seriestype=:scatter, marker_z=x3, cunit=u"ms")
+    @test cguide(pl) == "ms"
 end
 
 @testset "Bare units" begin

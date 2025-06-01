@@ -621,9 +621,8 @@ allShapes(arg) =
     (trueOrAllTrue(a -> get(_markerAliases, a, a) in _allMarkers || a isa Shape, arg))
 allAlphas(arg) = trueOrAllTrue(
     a ->
-        (typeof(a) <: Real && a > 0 && a < 1) || (
-            typeof(a) <: AbstractFloat && (a == zero(typeof(a)) || a == one(typeof(a)))
-        ),
+        (typeof(a) <: Real && a > 0 && a < 1) ||
+        (typeof(a) <: AbstractFloat && (a == zero(typeof(a)) || a == one(typeof(a)))),
     arg,
 )
 allReals(arg) = trueOrAllTrue(a -> typeof(a) <: Real, arg)
